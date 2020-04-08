@@ -13,7 +13,7 @@ web.on(WebClientEvent.RATE_LIMITED, (numSeconds) => {
 });
 
 function simplifyUser(user) {
-  if (user.name === "slackbot" || user.name === "robert.villacis26") {
+  if (user.name === "slackbot" || user.name === "korny") {
     console.log({ ...user });
   }
   return {
