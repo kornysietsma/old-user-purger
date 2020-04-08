@@ -62,7 +62,7 @@ async function sendToVoid(web, user) {
     await web.conversations.invite({ channel: VoidChannel, users: user.id });
   }
   for (const channel of channels) {
-    if (channel.id !== VoidChannel && channel.name !== 'hello') {
+    if (channel.id !== VoidChannel && channel.name !== "hello") {
       console.log(`kicking ${user.name} from ${channel.name}`);
       if (!previewMode) {
         await web.conversations.kick({ channel: channel.id, user: user.id });
@@ -71,23 +71,43 @@ async function sendToVoid(web, user) {
   }
 }
 
+async function findLastSearch(web, userId, userName) {
+  const result = await web.search.messages({
+    query: `from:@${userName}`,
+    count: 1,
+    sort: "timestamp",
+  });
+  //   console.log(`Searched for ${userName}`, result);
+  if (result.messages.matches.length === 0) {
+    // console.log("no results");
+    return null;
+  } else {
+    m = result.messages.matches[0];
+    return {
+      userName: m.username,
+      text: m.text,
+      timestamp: moment.unix(m.ts).toISOString(),
+    };
+  }
+}
+
 async function run(web) {
   try {
     const voidedUserList = await getVoided(web);
     console.log("alredy voided:", voidedUserList);
     const voidedUsers = new Set(voidedUserList);
-
-    var users = [];
-    const cutoffDate = moment().subtract(1, "years");
+    var processedUsers = 0;
+    const maxUsers = 10;
+    const cutoffDate = moment().subtract(1, "month"); // quite recent - seems profile updates happen without user activity sometimes. Maybe this should just go.
     console.log("cutoff:", cutoffDate.toISOString());
-    for await (const page of web.paginate("users.list", { limit: 50 })) {
-      oldUsers = page.members
+    for await (const page of web.paginate("users.list")) {
+      const oldUsers = page.members
         .map((m) => simplifyUser(m))
         .filter((m) => {
           const isOld = m.updated.isBefore(cutoffDate);
           const alreadyVoided = voidedUsers.has(m.id);
           const hasTitle = m.title !== undefined && m.title !== "";
-          const isCandidate =
+          var isCandidate =
             isOld &&
             !m.is_admin &&
             !m.is_bot &&
@@ -95,27 +115,35 @@ async function run(web) {
             !hasTitle &&
             !(m.name === "slackbot") &&
             !alreadyVoided;
-          console.log(
-            "check",
-            m.name,
-            m.is_admin,
-            m.is_bot,
-            m.deleted,
-            m.updated.toISOString(),
-            `'${m.title}'`,
-            isCandidate
-          );
+          //   console.log(
+          //     "check",
+          //     m.name,
+          //     m.is_admin,
+          //     m.is_bot,
+          //     m.deleted,
+          //     m.updated.toISOString(),
+          //     `'${m.title}'`,
+          //     isCandidate
+          //   );
           return isCandidate;
         });
-      users = [...users, ...oldUsers];
-      if (users.length > 5) {
-        break;
+      for (const user of oldUsers) {
+        const lastSearch = await findLastSearch(web, user.id, user.name);
+        if (lastSearch !== null) {
+          console.log(
+            "Found search for " + m.name + " - not voiding.",
+            lastSearch
+          );
+        } else {
+          await sendToVoid(web, user);
+          processedUsers = processedUsers + 1;
+          if (processedUsers > maxUsers) {
+            break;
+          }
+        }
       }
     }
-    for (const u of users) {
-      await sendToVoid(web, u);
-    }
-    return "ok";
+    return `voided ${processedUsers} users`;
   } catch (error) {
     // Check the code property, and when its a PlatformError, log the whole response.
     if (error.code === ErrorCode.PlatformError) {
